@@ -5,6 +5,7 @@ import io.aeron.protocol.RttMeasurementFlyweight;
 
 public class Main {
     public static void main(String[] args) {
-        RTTObtainer.main(args);
+        RttDemo.main(args);
+        // RTTObtainer.main(args);
     }
 }
