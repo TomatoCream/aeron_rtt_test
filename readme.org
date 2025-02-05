@@ -1,0 +1,24 @@
+#+title: Readme
+* results
+simple proof of concept that rtt can be obtained from the subscriber
+
+#+begin_src text
+
+=== RTT Measurements and Statistics ===
+Current RTT Measurements:
+/127.0.0.1:20122 -> 720666 ns
+
+Function Call Statistics:
+onRttMeasurement calls: 2660
+onRttMeasurementSent calls: 2660
+shouldMeasureRtt calls: 227654
+=====================================
+#+end_src
+* pub
+#+begin_src bash
+java --add-opens java.base/jdk.internal.misc=ALL-UNNAMED -Daeron.CubicCongestionControl.measureRtt=true -jar target/child-module-1.0.0-SNAPSHOT-all.jar --mode pub
+#+end_src
+* sub
+#+begin_src bash
+mvn install -T1C -DskipTests && java --add-opens java.base/jdk.internal.misc=ALL-UNNAMED -Daeron.CubicCongestionControl.measureRtt=true -jar target/child-module-1.0.0-SNAPSHOT-all.jar --mode sub
+#+end_src
