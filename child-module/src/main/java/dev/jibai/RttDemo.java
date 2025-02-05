@@ -18,6 +18,7 @@ import picocli.CommandLine.Option;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.ConcurrentLinkedQueue;
 
 @Command(name = "rtt-demo", mixinStandardHelpOptions = true,
     description = "Demonstrates RTT measurement in Aeron with publisher and subscriber")
@@ -101,10 +102,32 @@ public class RttDemo implements Runnable {
         private final int logIntervalSeconds;
         private long lastLogTime;
         private static final boolean DEBUG = Boolean.getBoolean("aeron.debug");
+        private final ConcurrentLinkedQueue<String> logQueue = new ConcurrentLinkedQueue<>();
+        private final Thread loggingThread;
+        private volatile boolean isRunning = true;
 
         public AeronLogger(int logIntervalSeconds) {
-            this.logIntervalSeconds = Math.max(logIntervalSeconds, 1); // Ensure at least 1 second interval
+            this.logIntervalSeconds = Math.max(logIntervalSeconds, 1);
             this.lastLogTime = System.nanoTime();
+            
+            this.loggingThread = new Thread(() -> {
+                while (isRunning && !Thread.currentThread().isInterrupted()) {
+                    String log = logQueue.poll();
+                    if (log != null) {
+                        System.out.println(log);
+                    } else {
+                        try {
+                            Thread.sleep(1);
+                        } catch (InterruptedException e) {
+                            Thread.currentThread().interrupt();
+                            break;
+                        }
+                    }
+                }
+            });
+            this.loggingThread.setName("logging-thread");
+            this.loggingThread.setPriority(Thread.MIN_PRIORITY);
+            this.loggingThread.start();
         }
 
         public void logPublisherStatus(Publication publication, long messagesSent) {
@@ -136,9 +159,8 @@ public class RttDemo implements Runnable {
         }
 
         public void logRtt(long msgCount, int sessionId, long rttNs) {
-            // Remove DEBUG condition to always print RTT
-            System.out.printf("[RTT] Message #%d - Session: %d, RTT: %.2f ms%n", 
-                msgCount, sessionId, rttNs / 1_000_000.0); // Convert ns to ms for readability
+                logQueue.offer(String.format("[RTT] Message #%d - Session: %d, RTT: %.2f ms",
+                    msgCount, sessionId, rttNs / 1_000_000.0));
         }
 
         public void logStartup(String component, String message) {
@@ -153,7 +175,6 @@ public class RttDemo implements Runnable {
         }
 
         private boolean shouldLog() {
-            // Simplified shouldLog logic
             long currentTime = System.nanoTime();
             if (TimeUnit.NANOSECONDS.toSeconds(currentTime - lastLogTime) >= logIntervalSeconds) {
                 lastLogTime = currentTime;
@@ -161,9 +182,23 @@ public class RttDemo implements Runnable {
             }
             return false;
         }
+
+        public void shutdown() {
+            isRunning = false;
+            loggingThread.interrupt();
+            try {
+                loggingThread.join(1000);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }
     }
 
     private void runPublisher(final Aeron aeron, final String channel) {
+        // Set high priority for publisher thread
+        Thread.currentThread().setPriority(Thread.MAX_PRIORITY);
+        Thread.currentThread().setName("aeron-publisher");
+        
         AeronLogger logger = new AeronLogger(Math.max(logIntervalSeconds, 1));
         logger.logStartup("PUB", "Starting publisher on channel: " + channel);
         long messagesSent = 0;
@@ -172,7 +207,7 @@ public class RttDemo implements Runnable {
                 channel + "|term-length=64k|sparse=false", STREAM_ID)) {
             logger.logStartup("PUB", "Publication added successfully");
             
-            while (running.get()) {
+            while (running.get() && !Thread.currentThread().isInterrupted()) {
                 OFFER_BUFFER.putLong(0, System.nanoTime());
                 final long result = publication.offer(OFFER_BUFFER, 0, MESSAGE_LENGTH);
                 
@@ -187,16 +222,23 @@ public class RttDemo implements Runnable {
                 // Ensure status is logged periodically
                 logger.logPublisherStatus(publication, messagesSent);
 
-                // Remove sleep and use yield instead for better latency
-                // Thread.yield();
-                Thread.sleep(100);
+                try {
+                    Thread.sleep(100);
+                } catch (InterruptedException ex) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
             }
-        } catch (InterruptedException ex) {
-            logger.logError("PUB", "Publisher interrupted", ex);
+        } finally {
+            logger.shutdown();
         }
     }
 
     private void runSubscriber(final Aeron aeron, final String channel) {
+        // Set high priority for subscriber thread
+        Thread.currentThread().setPriority(Thread.MAX_PRIORITY);
+        Thread.currentThread().setName("aeron-subscriber");
+        
         AeronLogger logger = new AeronLogger(logIntervalSeconds);
         logger.logStartup("SUB", "Starting subscriber on channel: " + channel);
         AtomicLong messagesReceived = new AtomicLong();
@@ -212,15 +254,22 @@ public class RttDemo implements Runnable {
                 channel + "|term-length=64k|sparse=false", STREAM_ID)) {
             logger.logStartup("SUB", "Subscription added successfully");
             
-            while (running.get()) {
+            while (running.get() && !Thread.currentThread().isInterrupted()) {
                 final int fragments = subscription.poll(fragmentHandler, FRAGMENT_LIMIT);
                 logger.logSubscribeResult(fragments, messagesReceived.get());
                 logger.logSubscriberStatus(subscription, messagesReceived.get());
                 
-                // if (fragments == 0) {
-                //     Thread.yield();
-                // }
+                try {
+                    if (fragments == 0) {
+                        Thread.sleep(1);
+                    }
+                } catch (InterruptedException ex) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
             }
+        } finally {
+            logger.shutdown();
         }
     }
 
