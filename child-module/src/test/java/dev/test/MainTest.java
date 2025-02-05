@@ -1,4 +1,4 @@
-package dev.jibai;
+package dev.test;
 
 import org.junit.jupiter.api.Test;
 

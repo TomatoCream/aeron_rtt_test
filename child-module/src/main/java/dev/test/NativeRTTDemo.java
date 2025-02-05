@@ -1,4 +1,4 @@
-package dev.jibai;
+package dev.test;
 
 import io.aeron.Aeron;
 import io.aeron.Publication;

@@ -1,7 +1,4 @@
-package dev.jibai;
-
-import io.aeron.driver.MediaDriver;
-import io.aeron.protocol.RttMeasurementFlyweight;
+package dev.test;
 
 public class Main {
     public static void main(String[] args) {
