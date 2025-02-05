@@ -14,9 +14,12 @@
 
     <dependencies>
         <dependency>
+            <groupId>info.picocli</groupId>
+            <artifactId>picocli</artifactId>
+        </dependency>
+        <dependency>
             <groupId>io.aeron</groupId>
             <artifactId>aeron-all</artifactId>
-            <version>1.46.7</version>
         </dependency>
         <dependency>
             <groupId>org.junit.jupiter</groupId>
@@ -24,6 +27,9 @@
             <scope>test</scope>
         </dependency>
     </dependencies>
+    <properties>
+        <argLine>--add-opens java.base/jdk.internal.misc=ALL-UNNAMED</argLine>
+    </properties>
     <build>
         <plugins>
             <plugin>

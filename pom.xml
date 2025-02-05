@@ -33,12 +33,11 @@ xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xs
     <maven-shade-plugin.version>3.6.0</maven-shade-plugin.version>
     <!-- packages -->
     <junit-bom.version>5.11.1</junit-bom.version>
-    <picocli.version>4.7.5</picocli.version>
-    <aeron.version>1.43.0</aeron.version>
+    <picocli.version>4.7.6</picocli.version>
+    <aeron.version>1.47.2</aeron.version>
   </properties>
   <dependencyManagement>
     <dependencies>
-
       <dependency>
         <groupId>org.junit</groupId>
         <artifactId>junit-bom</artifactId>
@@ -75,6 +74,12 @@ xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xs
           <groupId>org.apache.maven.plugins</groupId>
           <artifactId>maven-compiler-plugin</artifactId>
           <version>${maven-compiler-plugin.version}</version>
+          <configuration>
+            <compilerArgs>
+              <arg>--add-opens</arg>
+              <arg>java.base/jdk.internal.misc=ALL-UNNAMED</arg>
+            </compilerArgs>
+          </configuration>
         </plugin>
         <plugin>
           <groupId>org.apache.maven.plugins</groupId>
