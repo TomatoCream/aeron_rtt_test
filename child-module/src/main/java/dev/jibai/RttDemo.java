@@ -98,7 +98,7 @@ public class RttDemo implements Runnable {
         private static final boolean DEBUG = Boolean.getBoolean("aeron.debug");
 
         public AeronLogger(int logIntervalSeconds) {
-            this.logIntervalSeconds = logIntervalSeconds;
+            this.logIntervalSeconds = Math.max(logIntervalSeconds, 1); // Ensure at least 1 second interval
             this.lastLogTime = System.nanoTime();
         }
 
@@ -131,10 +131,9 @@ public class RttDemo implements Runnable {
         }
 
         public void logRtt(long msgCount, int sessionId, long rttNs) {
-            if (DEBUG) {
-                System.out.printf("[RTT] Message #%d - Session: %d, RTT: %d ns%n", 
-                    msgCount, sessionId, rttNs);
-            }
+            // Remove DEBUG condition to always print RTT
+            System.out.printf("[RTT] Message #%d - Session: %d, RTT: %.2f ms%n", 
+                msgCount, sessionId, rttNs / 1_000_000.0); // Convert ns to ms for readability
         }
 
         public void logStartup(String component, String message) {
@@ -149,7 +148,7 @@ public class RttDemo implements Runnable {
         }
 
         private boolean shouldLog() {
-            if (logIntervalSeconds <= 0) return false;
+            // Simplified shouldLog logic
             long currentTime = System.nanoTime();
             if (TimeUnit.NANOSECONDS.toSeconds(currentTime - lastLogTime) >= logIntervalSeconds) {
                 lastLogTime = currentTime;
@@ -160,7 +159,8 @@ public class RttDemo implements Runnable {
     }
 
     private void runPublisher(final Aeron aeron, final String channel) {
-        AeronLogger logger = new AeronLogger(logIntervalSeconds);
+        // Force at least 1 second interval if none specified
+        AeronLogger logger = new AeronLogger(Math.max(logIntervalSeconds, 1));
         logger.logStartup("PUB", "Starting publisher on channel: " + channel);
         long messagesSent = 0;
 
@@ -175,7 +175,11 @@ public class RttDemo implements Runnable {
                     messagesSent++;
                 }
                 
-                logger.logPublishResult(result, publication, messagesSent);
+                // Always log negative results
+                if (result < 0) {
+                    logger.logPublishResult(result, publication, messagesSent);
+                }
+                // Ensure status is logged periodically
                 logger.logPublisherStatus(publication, messagesSent);
 
                 Thread.sleep(1000);
@@ -204,10 +208,7 @@ public class RttDemo implements Runnable {
                 final int fragments = subscription.poll(fragmentHandler, FRAGMENT_LIMIT);
                 logger.logSubscribeResult(fragments, messagesReceived.get());
                 logger.logSubscriberStatus(subscription, messagesReceived.get());
-                Thread.sleep(100);
             }
-        } catch (InterruptedException ex) {
-            logger.logError("SUB", "Subscriber interrupted", ex);
         }
     }
 
