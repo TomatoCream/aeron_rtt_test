@@ -24,6 +24,12 @@ public class RTTObtainer implements Runnable
     @CommandLine.Option(names = {"-c", "--channel"}, description = "Channel")
     private String channel = "aeron:udp?endpoint=localhost:";
 
+    @CommandLine.Option(names = {"-l", "--log-interval"}, description = "Log interval in seconds (0 to disable)")
+    private int logIntervalSeconds = 5;
+
+    @CommandLine.Option(names = {"-d", "--debug"}, description = "Enable debug logging")
+    private boolean debugEnabled = false;
+
     private static final int STREAM_ID = 1001;
     private static final int FRAGMENT_LIMIT = 10;
     private static final AtomicLong RTT_NANOS = new AtomicLong();
@@ -34,6 +40,14 @@ public class RTTObtainer implements Runnable
     private Subscription subscription;
     private Publication publication;
 
+    private long lastLogTime = 0;
+
+    private void debug(String message) {
+        if (debugEnabled) {
+            System.out.printf("[DEBUG][%s] %s%n", mode, message);
+        }
+    }
+
     public static void main(String[] args)
     {
         new CommandLine(new RTTObtainer()).execute(args);
@@ -43,6 +57,7 @@ public class RTTObtainer implements Runnable
     public void run()
     {
         final String fullChannel = channel + (mode.equals("pub") ? port : port + 1);
+        debug("Starting with channel: " + fullChannel);
         
         try
         {
@@ -52,12 +67,14 @@ public class RTTObtainer implements Runnable
 
             if (mode.equals("pub"))
             {
+                debug("Initializing publisher");
                 publication = aeron.addPublication(fullChannel, STREAM_ID);
                 ScheduledExecutorService scheduledExecutorService = Executors.newSingleThreadScheduledExecutor();
                 scheduledExecutorService.scheduleAtFixedRate(this::sendRttMeasurement, 0, 1, TimeUnit.SECONDS);
             }
             else
             {
+                debug("Initializing subscriber");
                 subscription = aeron.addSubscription(fullChannel, STREAM_ID);
                 pollForMessages();
             }
@@ -76,31 +93,47 @@ public class RTTObtainer implements Runnable
 
     private void sendRttMeasurement()
     {
+        debug("Sending RTT measurement");
         RTT_BUFFER.putLong(0, System.nanoTime());
-        publication.offer(RTT_BUFFER, 0, Long.BYTES);
+        long result = publication.offer(RTT_BUFFER, 0, Long.BYTES);
+        debug("Send result: " + result);
     }
 
     private void pollForMessages()
     {
         final FragmentHandler handler = (buffer, offset, length, header) ->
         {
+            debug("Received message with length: " + length);
             final long timestampNs = buffer.getLong(offset);
             final long rttNs = System.nanoTime() - timestampNs;
             RTT_NANOS.set(rttNs);
             
             if (publication == null)
             {
+                debug("Creating publication for response");
                 publication = aeron.addPublication(channel + port, STREAM_ID);
-                publication.offer(buffer, offset, length);
+                long result = publication.offer(buffer, offset, length);
+                debug("Response send result: " + result);
             }
         };
 
         final IdleStrategy idle = new BusySpinIdleStrategy();
+        debug("Starting message polling loop");
+        
         while (true)
         {
             final int fragments = subscription.poll(handler, FRAGMENT_LIMIT);
             idle.idle(fragments);
             
+            long currentTime = System.nanoTime();
+            if (logIntervalSeconds > 0 && 
+                TimeUnit.NANOSECONDS.toSeconds(currentTime - lastLogTime) >= logIntervalSeconds)
+            {
+                System.out.printf("[STATUS][%s] Active on channel: %s, Fragments received: %d%n",
+                    mode, subscription.channel(), fragments);
+                lastLogTime = currentTime;
+            }
+
             final long rtt = RTT_NANOS.getAndSet(0);
             if (rtt > 0)
             {
