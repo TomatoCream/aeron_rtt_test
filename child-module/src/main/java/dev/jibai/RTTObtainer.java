@@ -41,6 +41,7 @@ public class RTTObtainer implements Runnable
     private Publication publication;
 
     private long lastLogTime = 0;
+    private long messagesSent = 0;  // Add counter for publisher stats
 
     private void debug(String message) {
         if (debugEnabled) {
@@ -56,7 +57,7 @@ public class RTTObtainer implements Runnable
     @Override
     public void run()
     {
-        final String fullChannel = channel + (mode.equals("pub") ? port : port + 1);
+        final String fullChannel = channel + (mode.equals("pub") ? port : port);
         debug("Starting with channel: " + fullChannel);
         
         try
@@ -96,7 +97,17 @@ public class RTTObtainer implements Runnable
         debug("Sending RTT measurement");
         RTT_BUFFER.putLong(0, System.nanoTime());
         long result = publication.offer(RTT_BUFFER, 0, Long.BYTES);
+        messagesSent++;
         debug("Send result: " + result);
+
+        long currentTime = System.nanoTime();
+        if (logIntervalSeconds > 0 && 
+            TimeUnit.NANOSECONDS.toSeconds(currentTime - lastLogTime) >= logIntervalSeconds)
+        {
+            System.out.printf("[STATUS][%s] Active on channel: %s, Messages sent: %d, Publication connected: %b%n",
+                mode, publication.channel(), messagesSent, publication.isConnected());
+            lastLogTime = currentTime;
+        }
     }
 
     private void pollForMessages()
@@ -129,8 +140,8 @@ public class RTTObtainer implements Runnable
             if (logIntervalSeconds > 0 && 
                 TimeUnit.NANOSECONDS.toSeconds(currentTime - lastLogTime) >= logIntervalSeconds)
             {
-                System.out.printf("[STATUS][%s] Active on channel: %s, Fragments received: %d%n",
-                    mode, subscription.channel(), fragments);
+                System.out.printf("[STATUS][%s] Active on channel: %s, Fragments received: %d, Subscription connected: %b%n",
+                    mode, subscription.channel(), fragments, subscription.isConnected());
                 lastLogTime = currentTime;
             }
 
