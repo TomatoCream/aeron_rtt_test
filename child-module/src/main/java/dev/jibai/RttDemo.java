@@ -53,7 +53,11 @@ public class RttDemo implements Runnable {
         // Configure Media Driver with Cubic Congestion Control
         System.out.println("Configuring Media Driver...");
         final MediaDriver.Context mediaDriverContext = new MediaDriver.Context()
-                .threadingMode(ThreadingMode.SHARED)
+                .threadingMode(ThreadingMode.DEDICATED)
+                .conductorIdleStrategy(new org.agrona.concurrent.BusySpinIdleStrategy())
+                .receiverIdleStrategy(new org.agrona.concurrent.BusySpinIdleStrategy())
+                .senderIdleStrategy(new org.agrona.concurrent.BusySpinIdleStrategy())
+                .termBufferSparseFile(false)
                 .dirDeleteOnStart(true)
                 .dirDeleteOnShutdown(true)
                 .congestControlSupplier(CubicCongestionControl::new);
@@ -66,7 +70,8 @@ public class RttDemo implements Runnable {
         // Configure Aeron
         System.out.println("Configuring Aeron...");
         final Aeron.Context aeronContext = new Aeron.Context()
-            .aeronDirectoryName(mediaDriver.aeronDirectoryName());
+            .aeronDirectoryName(mediaDriver.aeronDirectoryName())
+            .idleStrategy(new org.agrona.concurrent.BusySpinIdleStrategy());
 
         // Create Aeron instance
         System.out.println("Connecting to Aeron...");
@@ -159,12 +164,12 @@ public class RttDemo implements Runnable {
     }
 
     private void runPublisher(final Aeron aeron, final String channel) {
-        // Force at least 1 second interval if none specified
         AeronLogger logger = new AeronLogger(Math.max(logIntervalSeconds, 1));
         logger.logStartup("PUB", "Starting publisher on channel: " + channel);
         long messagesSent = 0;
 
-        try (Publication publication = aeron.addPublication(channel, STREAM_ID)) {
+        try (Publication publication = aeron.addPublication(
+                channel + "|term-length=64k|sparse=false", STREAM_ID)) {
             logger.logStartup("PUB", "Publication added successfully");
             
             while (running.get()) {
@@ -182,7 +187,9 @@ public class RttDemo implements Runnable {
                 // Ensure status is logged periodically
                 logger.logPublisherStatus(publication, messagesSent);
 
-                Thread.sleep(1000);
+                // Remove sleep and use yield instead for better latency
+                // Thread.yield();
+                Thread.sleep(100);
             }
         } catch (InterruptedException ex) {
             logger.logError("PUB", "Publisher interrupted", ex);
@@ -201,13 +208,18 @@ public class RttDemo implements Runnable {
             logger.logRtt(msgCount, header.sessionId(), rttNs);
         };
 
-        try (Subscription subscription = aeron.addSubscription(channel, STREAM_ID)) {
+        try (Subscription subscription = aeron.addSubscription(
+                channel + "|term-length=64k|sparse=false", STREAM_ID)) {
             logger.logStartup("SUB", "Subscription added successfully");
             
             while (running.get()) {
                 final int fragments = subscription.poll(fragmentHandler, FRAGMENT_LIMIT);
                 logger.logSubscribeResult(fragments, messagesReceived.get());
                 logger.logSubscriberStatus(subscription, messagesReceived.get());
+                
+                // if (fragments == 0) {
+                //     Thread.yield();
+                // }
             }
         }
     }
