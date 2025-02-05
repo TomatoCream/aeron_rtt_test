@@ -41,7 +41,7 @@ public class MyCC extends CubicCongestionControl {
         super.onRttMeasurement(nowNs, rttNs, srcAddress);
         rttMeasurements.put(srcAddress, rttNs);
         onRttMeasurementCounter.incrementAndGet();
-        System.out.println("rttNs = " + rttNs + " for " + srcAddress);
+        printAllRttMeasurements();
     }
 
     @Override

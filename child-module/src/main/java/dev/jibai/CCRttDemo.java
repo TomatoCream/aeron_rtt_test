@@ -52,7 +52,7 @@ public class CCRttDemo implements Runnable {
         final MediaDriver.Context ctx = new MediaDriver.Context()
             .dirDeleteOnStart(true)
             .dirDeleteOnShutdown(true)
-            // .congestControlSupplier(MyCC::new)
+            .congestControlSupplier(MyCC::new)
                 ;
         System.out.println("MediaDriver context configured");
 
