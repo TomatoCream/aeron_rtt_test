@@ -103,6 +103,7 @@ public class CCRttDemo implements Runnable {
 
         while (running.get()) {
             System.out.println("\nAttempting to publish message #" + (messageCount + 1));
+            MyCC.printAllRttMeasurements();
             
             long result = publication.offer(unsafeBuffer);
             logPublicationResult("", result, messageCount);

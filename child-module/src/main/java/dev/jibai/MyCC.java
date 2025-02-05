@@ -9,9 +9,13 @@ import org.agrona.concurrent.status.CountersManager;
 
 import java.net.InetSocketAddress;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class MyCC extends CubicCongestionControl {
-    public final AtomicLong currentRttNs = new AtomicLong(-1);
+    public static final ConcurrentHashMap<InetSocketAddress, Long> rttMeasurements = new ConcurrentHashMap<>();
+    private static final AtomicLong onRttMeasurementCounter = new AtomicLong(0);
+    private static final AtomicLong onRttMeasurementSentCounter = new AtomicLong(0);
+    private static final AtomicLong shouldMeasureRttCounter = new AtomicLong(0);
 
     /**
      * Construct a new {@link CongestionControl} instance for a received stream image using the Cubic algorithm.
@@ -30,34 +34,42 @@ public class MyCC extends CubicCongestionControl {
      */
     public MyCC(long registrationId, UdpChannel udpChannel, int streamId, int sessionId, int termLength, int senderMtuLength, InetSocketAddress controlAddress, InetSocketAddress sourceAddress, NanoClock nanoClock, MediaDriver.Context context, CountersManager countersManager) {
         super(registrationId, udpChannel, streamId, sessionId, termLength, senderMtuLength, controlAddress, sourceAddress, nanoClock, context, countersManager);
-        if (true) {
-            throw new RuntimeException();
-        }
     }
 
     @Override
     public void onRttMeasurement(long nowNs, long rttNs, InetSocketAddress srcAddress) {
-        if (true) {
-            throw new RuntimeException();
-        }
         super.onRttMeasurement(nowNs, rttNs, srcAddress);
-        currentRttNs.set(rttNs);
-        System.out.println("rttNs = " + rttNs);
+        rttMeasurements.put(srcAddress, rttNs);
+        onRttMeasurementCounter.incrementAndGet();
+        System.out.println("rttNs = " + rttNs + " for " + srcAddress);
     }
 
     @Override
     public void onRttMeasurementSent(long nowNs) {
         super.onRttMeasurementSent(nowNs);
-        if (true) {
-            throw new RuntimeException();
-        }
+        onRttMeasurementSentCounter.incrementAndGet();
     }
 
     @Override
     public boolean shouldMeasureRtt(long nowNs) {
-        if (true) {
-            throw new RuntimeException();
-        }
+        shouldMeasureRttCounter.incrementAndGet();
         return super.shouldMeasureRtt(nowNs);
+    }
+
+    /**
+     * Prints all current RTT measurements stored in the map and function call statistics.
+     * Format: "Source Address -> RTT in nanoseconds"
+     */
+    public static void printAllRttMeasurements() {
+        System.out.println("\n=== RTT Measurements and Statistics ===");
+        System.out.println("Current RTT Measurements:");
+        rttMeasurements.forEach((address, rtt) -> 
+            System.out.printf("%s -> %d ns%n", address, rtt));
+        
+        System.out.println("\nFunction Call Statistics:");
+        System.out.printf("onRttMeasurement calls: %d%n", onRttMeasurementCounter.get());
+        System.out.printf("onRttMeasurementSent calls: %d%n", onRttMeasurementSentCounter.get());
+        System.out.printf("shouldMeasureRtt calls: %d%n", shouldMeasureRttCounter.get());
+        System.out.println("=====================================\n");
     }
 }
