@@ -48,7 +48,10 @@ public class RttDemo implements Runnable {
 
     @Override
     public void run() {
+        System.out.println("Starting RttDemo in mode: " + mode);
+        
         // Configure Media Driver with Cubic Congestion Control
+        System.out.println("Configuring Media Driver...");
         final MediaDriver.Context mediaDriverContext = new MediaDriver.Context()
                 .threadingMode(ThreadingMode.SHARED)
                 .dirDeleteOnStart(true)
@@ -56,14 +59,19 @@ public class RttDemo implements Runnable {
                 .congestControlSupplier(CubicCongestionControl::new);
 
         // Start Media Driver
+        System.out.println("Launching Media Driver...");
         MediaDriver mediaDriver = MediaDriver.launch(mediaDriverContext);
+        System.out.println("Media Driver launched successfully");
 
         // Configure Aeron
+        System.out.println("Configuring Aeron...");
         final Aeron.Context aeronContext = new Aeron.Context()
             .aeronDirectoryName(mediaDriver.aeronDirectoryName());
 
         // Create Aeron instance
+        System.out.println("Connecting to Aeron...");
         final Aeron aeron = Aeron.connect(aeronContext);
+        System.out.println("Connected to Aeron successfully");
 
         // Handle shutdown gracefully
         SigInt.register(() -> running.set(false));
@@ -84,78 +92,126 @@ public class RttDemo implements Runnable {
         }
     }
 
+    private static class AeronLogger {
+        private final int logIntervalSeconds;
+        private long lastLogTime;
+        private static final boolean DEBUG = Boolean.getBoolean("aeron.debug");
+
+        public AeronLogger(int logIntervalSeconds) {
+            this.logIntervalSeconds = logIntervalSeconds;
+            this.lastLogTime = System.nanoTime();
+        }
+
+        public void logPublisherStatus(Publication publication, long messagesSent) {
+            if (shouldLog()) {
+                System.out.printf("[STATUS][PUB] Channel: %s, Messages sent: %d, Connected: %b, Position: %d%n",
+                    publication.channel(), messagesSent, publication.isConnected(), publication.position());
+            }
+        }
+
+        public void logSubscriberStatus(Subscription subscription, long messagesReceived) {
+            if (shouldLog()) {
+                System.out.printf("[STATUS][SUB] Channel: %s, Messages received: %d, Connected: %b%n",
+                    subscription.channel(), messagesReceived, subscription.isConnected());
+            }
+        }
+
+        public void logPublishResult(long result, Publication publication, long messagesSent) {
+            if (result < 0 || DEBUG) {
+                System.out.printf("[PUB] Offer result: %d, Connected: %b, Messages: %d%n",
+                    result, publication.isConnected(), messagesSent);
+            }
+        }
+
+        public void logSubscribeResult(int fragments, long messagesReceived) {
+            if (fragments > 0 || DEBUG) {
+                System.out.printf("[SUB] Received fragments: %d, Total messages: %d%n",
+                    fragments, messagesReceived);
+            }
+        }
+
+        public void logRtt(long msgCount, int sessionId, long rttNs) {
+            if (DEBUG) {
+                System.out.printf("[RTT] Message #%d - Session: %d, RTT: %d ns%n", 
+                    msgCount, sessionId, rttNs);
+            }
+        }
+
+        public void logStartup(String component, String message) {
+            System.out.printf("[STARTUP][%s] %s%n", component, message);
+        }
+
+        public void logError(String component, String message, Throwable ex) {
+            System.err.printf("[ERROR][%s] %s: %s%n", component, message, ex.getMessage());
+            if (DEBUG) {
+                ex.printStackTrace();
+            }
+        }
+
+        private boolean shouldLog() {
+            if (logIntervalSeconds <= 0) return false;
+            long currentTime = System.nanoTime();
+            if (TimeUnit.NANOSECONDS.toSeconds(currentTime - lastLogTime) >= logIntervalSeconds) {
+                lastLogTime = currentTime;
+                return true;
+            }
+            return false;
+        }
+    }
+
     private void runPublisher(final Aeron aeron, final String channel) {
-        System.out.printf("Publishing to channel: %s on stream ID: %d%n", channel, STREAM_ID);
+        AeronLogger logger = new AeronLogger(logIntervalSeconds);
+        logger.logStartup("PUB", "Starting publisher on channel: " + channel);
         long messagesSent = 0;
-        long lastLogTime = System.nanoTime();
 
         try (Publication publication = aeron.addPublication(channel, STREAM_ID)) {
+            logger.logStartup("PUB", "Publication added successfully");
+            
             while (running.get()) {
-                // Prepare message with current timestamp
                 OFFER_BUFFER.putLong(0, System.nanoTime());
-                
-                // Offer message
                 final long result = publication.offer(OFFER_BUFFER, 0, MESSAGE_LENGTH);
+                
                 if (result > 0) {
                     messagesSent++;
-                    debug("Message sent successfully");
-                } else {
-                    debug("Offer failed with result: " + result);
                 }
+                
+                logger.logPublishResult(result, publication, messagesSent);
+                logger.logPublisherStatus(publication, messagesSent);
 
-                // Periodic status logging
-                long currentTime = System.nanoTime();
-                if (logIntervalSeconds > 0 &&
-                    TimeUnit.NANOSECONDS.toSeconds(currentTime - lastLogTime) >= logIntervalSeconds) {
-                    System.out.printf("[STATUS][PUB] Channel: %s, Messages sent: %d, Connected: %b, Position: %d%n",
-                        publication.channel(), messagesSent, publication.isConnected(), publication.position());
-                    lastLogTime = currentTime;
-                }
-
-                Thread.sleep(1000); // Sleep for a second between sends
+                Thread.sleep(1000);
             }
         } catch (InterruptedException ex) {
-            Thread.currentThread().interrupt();
-            System.err.println("Publisher interrupted: " + ex.getMessage());
+            logger.logError("PUB", "Publisher interrupted", ex);
         }
     }
 
     private void runSubscriber(final Aeron aeron, final String channel) {
-        System.out.printf("Subscribing to channel: %s on stream ID: %d%n", channel, STREAM_ID);
+        AeronLogger logger = new AeronLogger(logIntervalSeconds);
+        logger.logStartup("SUB", "Starting subscriber on channel: " + channel);
         AtomicLong messagesReceived = new AtomicLong();
-        long lastLogTime = System.nanoTime();
 
         final FragmentHandler fragmentHandler = (buffer, offset, length, header) -> {
             final long sendTimeNs = buffer.getLong(offset);
             final long rttNs = System.nanoTime() - sendTimeNs;
-            messagesReceived.getAndIncrement();
-            
-            debug(String.format("Received message from session %d, RTT: %d ns", 
-                header.sessionId(), rttNs));
+            long msgCount = messagesReceived.incrementAndGet();
+            logger.logRtt(msgCount, header.sessionId(), rttNs);
         };
 
         try (Subscription subscription = aeron.addSubscription(channel, STREAM_ID)) {
+            logger.logStartup("SUB", "Subscription added successfully");
+            
             while (running.get()) {
                 final int fragments = subscription.poll(fragmentHandler, FRAGMENT_LIMIT);
-                
-                // Periodic status logging
-                long currentTime = System.nanoTime();
-                if (logIntervalSeconds > 0 && 
-                    TimeUnit.NANOSECONDS.toSeconds(currentTime - lastLogTime) >= logIntervalSeconds) {
-                    System.out.printf("[STATUS][SUB] Channel: %s, Messages received: %d, Connected: %b",
-                        subscription.channel(), messagesReceived, subscription.isConnected());
-                    lastLogTime = currentTime;
-                }
-
-                Thread.sleep(100); // Small sleep to prevent tight loop
+                logger.logSubscribeResult(fragments, messagesReceived.get());
+                logger.logSubscriberStatus(subscription, messagesReceived.get());
+                Thread.sleep(100);
             }
         } catch (InterruptedException ex) {
-            Thread.currentThread().interrupt();
-            System.err.println("Subscriber interrupted: " + ex.getMessage());
+            logger.logError("SUB", "Subscriber interrupted", ex);
         }
     }
 
     private void debug(String message) {
-        // Implementation of debug method
+        System.out.println("[DEBUG] " + message);
     }
 }
