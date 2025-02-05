@@ -43,8 +43,12 @@ public class CCRttDemo implements Runnable {
 
     @Override
     public void run() {
-        // Remove network channel related code
-        final String channel = CHANNEL_PREFIX + "localhost:" + (port + 1) + "|cc=cubic";
+        // Update channel configuration to include control endpoints for RTT measurement
+        final String channel = CHANNEL_PREFIX + host + ":" + port + 
+            "|control=" + host + ":" + (port + 1) + 
+            "|control-mode=dynamic" +
+            "|cc=cubic";
+        
         System.out.println("Mode: " + mode);
         System.out.println("Channel: " + channel);
 
